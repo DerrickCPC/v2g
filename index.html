@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Voice</title>
+<style>
+  html, body {
+    margin: 0; height: 100%;
+    background: #000; color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang HK", "PingFang TC", "Noto Sans TC", sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  .screen { position: fixed; inset: 0; display: none; }
+  .screen.active { display: flex; }
+
+  /* 設定畫面 */
+  #setup {
+    flex-direction: column; justify-content: center;
+    gap: 20px; padding: 24px; box-sizing: border-box;
+    max-width: 420px; margin: 0 auto;
+  }
+  #setup label { font-size: 15px; color: #aaa; display: block; margin-bottom: 6px; }
+  #setup select, #setup button {
+    width: 100%; font-size: 18px; padding: 14px;
+    border-radius: 12px; border: 1px solid #333;
+    background: #111; color: #fff;
+    -webkit-appearance: none; appearance: none;
+  }
+  #startBtn { background: #fff; color: #000; font-weight: 600; border: none; margin-top: 8px; }
+  #startBtn:disabled { background: #333; color: #777; }
+  #msg { font-size: 15px; color: #e74c3c; line-height: 1.5; min-height: 1em; }
+
+  /* 表演畫面 */
+  #perform {
+    justify-content: center; align-items: center;
+    touch-action: manipulation;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #dateText { font-size: min(18vw, 140px); font-weight: 600; letter-spacing: 0.02em; }
+  #dot {
+    position: absolute;
+    top: calc(env(safe-area-inset-top) + 12px);
+    left: calc(env(safe-area-inset-left) + 12px);
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #444; opacity: 0.85;
+  }
+  #dot.green  { background: #2ecc71; }
+  #dot.yellow { background: #f1c40f; }
+  #dot.red    { background: #e74c3c; }
+  #tip {
+    position: absolute; left: 16px; right: 16px;
+    bottom: calc(env(safe-area-inset-bottom) + 16px);
+    text-align: center; font-size: 13px; color: #888;
+    opacity: 0; transition: opacity 0.4s;
+  }
+  #tip.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<!-- 設定畫面 -->
+<div id="setup" class="screen active">
+  <div>
+    <label for="rangeSel">範圍</label>
+    <select id="rangeSel"></select>
+  </div>
+  <div>
+    <label for="langSel">語言</label>
+    <select id="langSel">
+      <option value="zh-HK">廣東話</option>
+      <option value="zh-CN">普通話</option>
+    </select>
+  </div>
+  <button id="startBtn">開始表演</button>
+  <div id="msg"></div>
+</div>
+
+<!-- 表演畫面 -->
+<div id="perform" class="screen">
+  <div id="dot"></div>
+  <div id="dateText"></div>
+  <div id="tip"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ================= 設定 =================
+  const CONFIRM_WORD = '非常好';
+  const DOUBLE_TAP_MS = 400;
+  const STORE_KEY = 'voice.settings';
+
+  // 對照表：總和 → 牌名
+  const CARD_TABLE = {
+     2:'黑桃2',  3:'方塊5',  4:'梅花8',  5:'紅桃J',  6:'黑桃K',  7:'紅桃10',
+     8:'梅花7',  9:'方塊4', 10:'黑桃A', 11:'紅桃8', 12:'梅花5', 13:'方塊2',
+    14:'黑桃Q', 15:'紅桃9', 16:'梅花6', 17:'方塊3', 18:'黑桃10',19:'紅桃7',
+    20:'梅花4', 21:'方塊A', 22:'黑桃J', 23:'黑桃9', 24:'紅桃6', 25:'梅花3',
+    26:'方塊K', 27:'方塊Q', 28:'方塊10',29:'黑桃7', 30:'紅桃4', 31:'梅花A',
+    32:'方塊J', 33:'黑桃8', 34:'紅桃5', 35:'梅花2', 36:'紅桃2', 37:'梅花Q',
+    38:'方塊9', 39:'黑桃6', 40:'紅桃3', 41:'梅花K', 42:'黑桃4', 43:'紅桃A'
+  };
+
+  // ================= 數字解析 =================
+  const CN_DIGIT = { '零':0,'〇':0,'○':0,'一':1,'二':2,'兩':2,'两':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9 };
+
+  function toHalfWidth(s) {
+    return s.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+  }
+
+  function parseNum(raw) {
+    let s = toHalfWidth(raw);
+    if (/^\d+$/.test(s)) return parseInt(s, 10);
+    s = s.replace(/廿/g, '二十').replace(/卅/g, '三十');
+    if (!/^[零〇○一二兩两三四五六七八九十]+$/.test(s)) return NaN;
+    const i = s.indexOf('十');
+    if (i === -1) {                       // 例如「一二」→ 12
+      let n = 0;
+      for (const c of s) n = n * 10 + CN_DIGIT[c];
+      return n;
+    }
+    if (s.indexOf('十', i + 1) !== -1) return NaN;
+    const L = s.slice(0, i), R = s.slice(i + 1);
+    if (L.length > 1 || R.length > 1) return NaN;
+    const tens = L ? CN_DIGIT[L] : 1;
+    const ones = R ? CN_DIGIT[R] : 0;
+    return tens * 10 + ones;
+  }
+
+  // ================= 範圍（之後可以加新範圍） =================
+  const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  const NUM = '[0-9０-９零〇○一二兩两三四五六七八九十廿卅]+';
+  const DATE_RE = new RegExp('(' + NUM + ')\\s*月\\s*(' + NUM + ')\\s*(?:日|號|号)', 'g');
+
+  const RANGES = {
+    date: {
+      label: '日子',
+      // 喺一段文字入面搵最後一個有效日子
+      parse(text) {
+        let found = null, m;
+        DATE_RE.lastIndex = 0;
+        while ((m = DATE_RE.exec(text)) !== null) {
+          const mo = parseNum(m[1]), d = parseNum(m[2]);
+          if (mo >= 1 && mo <= 12 && d >= 1 && d <= DAYS_IN_MONTH[mo - 1]) {
+            found = { m: mo, d: d };
+          }
+        }
+        return found;
+      },
+      format(item) { return item.m + '月' + item.d + '日'; },
+      query(item)  { return CARD_TABLE[item.m + item.d]; }
+    }
+  };
+
+  // ================= 元素同狀態 =================
+  const $ = id => document.getElementById(id);
+  const els = {
+    setup: $('setup'), perform: $('perform'),
+    rangeSel: $('rangeSel'), langSel: $('langSel'),
+    startBtn: $('startBtn'), msg: $('msg'),
+    dot: $('dot'), dateText: $('dateText'), tip: $('tip')
+  };
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  let settings = { range: 'date', lang: 'zh-HK' };
+  let active = false;        // 表演緊
+  let redirecting = false;   // 跳轉緊
+  let rec = null;            // 目前嘅語音辨識
+  let committed = null;      // 之前幾段收音留低嘅日子
+  let current = null;        // 而家顯示緊嘅日子
+  let restartTimer = null;
+  let failCount = 0;
+  let fatal = false;
+  let statusColor = '';
+  let wakeLock = null;
+  let lastTap = 0;
+  let exitAt = 0;
+  let tipTimer = null;
+
+  // ================= 設定畫面 =================
+  function loadSettings() {
+    try {
+      const s = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
+      if (s.range && RANGES[s.range]) settings.range = s.range;
+      if (s.lang === 'zh-HK' || s.lang === 'zh-CN') settings.lang = s.lang;
+    } catch (e) {}
+  }
+  function saveSettings() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(settings)); } catch (e) {}
+  }
+
+  function initSetup() {
+    for (const key in RANGES) {
+      const o = document.createElement('option');
+      o.value = key; o.textContent = RANGES[key].label;
+      els.rangeSel.appendChild(o);
+    }
+    loadSettings();
+    els.rangeSel.value = settings.range;
+    els.langSel.value = settings.lang;
+
+    const ua = navigator.userAgent;
+    const isIOS = /iPad|iPhone|iPod/.test(ua) ||
+                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const iosOtherBrowser = isIOS && /CriOS|FxiOS|EdgiOS|OPiOS/.test(ua);
+
+    let problem = '';
+    if (!window.isSecureContext) problem = '要用 https:// 開呢個網頁。';
+    else if (iosOtherBrowser) problem = 'iPhone 請用 Safari 開呢個網頁。';
+    else if (!SR) problem = isIOS
+      ? '語音辨識用唔到。請用 Safari，並喺 設定 → 一般 → 鍵盤 開啟「聽寫」。'
+      : '呢個瀏覽器唔支援語音辨識。iPhone 請用 Safari，Android 請用 Chrome。';
+
+    if (problem) {
+      els.msg.textContent = problem;
+      els.startBtn.disabled = true;
+    }
+    els.startBtn.addEventListener('click', startPerformance);
+  }
+
+  // ================= 表演流程 =================
+  function startPerformance() {
+    if (Date.now() - exitAt < 600) return;  // 防止雙擊離開時誤觸
+    settings.range = els.rangeSel.value;
+    settings.lang = els.langSel.value;
+    saveSettings();
+
+    active = true; redirecting = false; fatal = false; failCount = 0;
+    committed = null; setCurrent(null);
+    els.setup.classList.remove('active');
+    els.perform.classList.add('active');
+    setStatus('yellow');
+
+    startRecognition();      // 要喺撳掣嗰下即刻開始（iOS 要求）
+    requestWakeLock();
+  }
+
+  function exitPerformance() {
+    if (!active) return;
+    active = false;
+    exitAt = Date.now();
+    stopRecognition();
+    releaseWakeLock();
+    committed = null; setCurrent(null);
+    setStatus('');
+    hideTip();
+    els.perform.classList.remove('active');
+    els.setup.classList.add('active');
+  }
+
+  function setCurrent(item) {
+    current = item;
+    els.dateText.textContent = item ? RANGES[settings.range].format(item) : '';
+  }
+
+  function setStatus(color) {
+    statusColor = color;
+    els.dot.className = color;
+  }
+
+  // 處理一段收音嘅全部文字
+  function handleTranscript(text) {
+    const range = RANGES[settings.range];
+    const parts = text.split(CONFIRM_WORD);
+    let item = committed;
+    for (let i = 0; i < parts.length; i++) {
+      const found = range.parse(parts[i]);
+      if (found) item = found;
+      const followedByConfirm = i < parts.length - 1;
+      if (followedByConfirm && item) {   // 「非常好」前面有日子 → 跳轉
+        setCurrent(item);
+        go(range, item);
+        return;
+      }
+      // 「非常好」前面冇日子 → 唔理，繼續
+    }
+    setCurrent(item);
+  }
+
+  function go(range, item) {
+    if (redirecting) return;
+    redirecting = true;
+    stopRecognition();
+    const q = range.query(item);
+    location.replace('https://www.google.com/search?q=' + encodeURIComponent(q));
+  }
+
+  // ================= 語音辨識 =================
+  function startRecognition() {
+    clearTimeout(restartTimer);
+    if (!active || redirecting || rec) return;
+
+    const r = new SR();
+    r.lang = settings.lang;
+    r.continuous = true;
+    r.interimResults = true;
+    r.maxAlternatives = 1;
+    let started = false;
+
+    r.onstart = () => {
+      if (rec !== r) return;
+      started = true; failCount = 0;
+      setStatus('green');
+    };
+    r.onresult = (e) => {
+      if (rec !== r || !active || redirecting) return;
+      let text = '';
+      for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript;
+      handleTranscript(text);
+    };
+    r.onerror = (e) => {
+      if (rec !== r) return;
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        fatal = true;
+        setStatus('red');
+      } else if (e.error === 'audio-capture') {
+        setStatus('red');
+      }
+    };
+    r.onend = () => {
+      if (rec !== r) return;
+      rec = null;
+      committed = current;               // 保留已經聽到嘅日子
+      if (!active || redirecting) return;
+      if (fatal) { setStatus('red'); return; }
+      if (!started) failCount++;
+      setStatus(failCount >= 3 ? 'red' : 'yellow');
+      scheduleRestart();
+    };
+
+    rec = r;
+    try {
+      r.start();
+    } catch (err) {
+      rec = null;
+      failCount++;
+      setStatus(failCount >= 3 ? 'red' : 'yellow');
+      scheduleRestart();
+    }
+  }
+
+  function scheduleRestart() {
+    clearTimeout(restartTimer);
+    restartTimer = setTimeout(startRecognition, failCount >= 3 ? 2000 : 250);
+  }
+
+  function stopRecognition() {
+    clearTimeout(restartTimer);
+    const r = rec;
+    rec = null;
+    if (r) { try { r.abort(); } catch (e) {} }
+  }
+
+  // ================= 保持屏幕開住 =================
+  async function requestWakeLock() {
+    if (!('wakeLock' in navigator)) { showTip(); return; }
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } catch (e) {
+      showTip();
+    }
+  }
+  function releaseWakeLock() {
+    if (wakeLock) { try { wakeLock.release(); } catch (e) {} wakeLock = null; }
+  }
+  function showTip() {
+    els.tip.textContent = '保持屏幕開住失敗：請去 設定 → 螢幕顯示與亮度 → 自動鎖定 → 永不';
+    els.tip.classList.add('show');
+    clearTimeout(tipTimer);
+    tipTimer = setTimeout(hideTip, 4000);
+  }
+  function hideTip() {
+    clearTimeout(tipTimer);
+    els.tip.classList.remove('show');
+  }
+
+  // ================= 雙擊離開 / 單擊重試 =================
+  els.perform.addEventListener('touchend', (e) => {
+    const now = Date.now();
+    if (now - lastTap < DOUBLE_TAP_MS) {
+      e.preventDefault();             // 阻止放大同埋誤觸設定畫面
+      lastTap = 0;
+      exitPerformance();
+      return;
+    }
+    lastTap = now;
+    // 狀態紅色時，撳一下畫面會用手勢重新開始收音
+    if (active && statusColor === 'red') {
+      stopRecognition();
+      fatal = false; failCount = 0;
+      setStatus('yellow');
+      startRecognition();
+    }
+  }, { passive: false });
+
+  els.perform.addEventListener('dblclick', (e) => {   // 電腦測試用
+    e.preventDefault();
+    exitPerformance();
+  });
+
+  // ================= 切換 App / 返回網頁 =================
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && active && !redirecting) {
+      if (!wakeLock) requestWakeLock();
+      if (!rec) startRecognition();
+    }
+  });
+
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted) {
+      redirecting = false;
+      exitPerformance();
+    }
+  });
+
+  initSetup();
+})();
+</script>
+</body>
+</html>
