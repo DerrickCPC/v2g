@@ -15,7 +15,6 @@
   .screen { position: fixed; inset: 0; display: none; }
   .screen.active { display: flex; }
 
-  /* 設定畫面 */
   #setup {
     flex-direction: column; justify-content: center;
     gap: 20px; padding: 24px; box-sizing: border-box;
@@ -32,7 +31,6 @@
   #startBtn:disabled { background: #333; color: #777; }
   #msg { font-size: 15px; color: #e74c3c; line-height: 1.5; min-height: 1em; }
 
-  /* 表演畫面 */
   #perform {
     justify-content: center; align-items: center;
     touch-action: manipulation;
@@ -62,7 +60,6 @@
 </head>
 <body>
 
-<!-- 設定畫面 -->
 <div id="setup" class="screen active">
   <div>
     <label for="rangeSel">範圍</label>
@@ -79,7 +76,6 @@
   <div id="msg"></div>
 </div>
 
-<!-- 表演畫面 -->
 <div id="perform" class="screen">
   <div id="dot"></div>
   <div id="dateText"></div>
@@ -95,16 +91,25 @@
   const DOUBLE_TAP_MS = 400;
   const STORE_KEY = 'voice.settings';
 
-  // 對照表：總和 → 牌名
+  // 對照表：總和 → 牌（S黑桃 H紅桃 D方塊 C梅花）
   const CARD_TABLE = {
-     2:'黑桃2',  3:'方塊5',  4:'梅花8',  5:'紅桃J',  6:'黑桃K',  7:'紅桃10',
-     8:'梅花7',  9:'方塊4', 10:'黑桃A', 11:'紅桃8', 12:'梅花5', 13:'方塊2',
-    14:'黑桃Q', 15:'紅桃9', 16:'梅花6', 17:'方塊3', 18:'黑桃10',19:'紅桃7',
-    20:'梅花4', 21:'方塊A', 22:'黑桃J', 23:'黑桃9', 24:'紅桃6', 25:'梅花3',
-    26:'方塊K', 27:'方塊Q', 28:'方塊10',29:'黑桃7', 30:'紅桃4', 31:'梅花A',
-    32:'方塊J', 33:'黑桃8', 34:'紅桃5', 35:'梅花2', 36:'紅桃2', 37:'梅花Q',
-    38:'方塊9', 39:'黑桃6', 40:'紅桃3', 41:'梅花K', 42:'黑桃4', 43:'紅桃A'
+    2:'2S',   3:'5D',   4:'8C',   5: 'JS', 
+    6:'AS',   7:'4D',   8:'7C',   9:'10H', 10:'KS',  11:'3D',
+    12:'6C',  13:'9H',  14:'QS',  15:'2D',  16:'5C',  17:'8H',
+    18:'JS',  19:'AD',  20:'4C',  21:'7H',  22:'10S', 23:'KD',
+    24:'3C',  25:'6H',  26:'9S',  27:'QD',  28:'2C',  29:'5H',
+    30:'8S',  31:'JD',  32:'AC',  33:'4H',  34:'7S',  35:'10D',
+    36:'KC',  37:'3H',  38:'6S',  39:'9D',  40:'QC',  41:'2H',
+    42:'5S',  43:'8D'
   };
+
+  // 牌代碼 → 搜尋字（例如 AS → 黑桃A）
+  const SUIT_NAME = { S:'黑桃', H:'紅桃', D:'方塊', C:'梅花' };
+  function cardToQuery(code) {
+    const suit = code.slice(-1);
+    const rank = code.slice(0, -1);
+    return SUIT_NAME[suit] + rank;
+  }
 
   // ================= 數字解析 =================
   const CN_DIGIT = { '零':0,'〇':0,'○':0,'一':1,'二':2,'兩':2,'两':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9 };
@@ -119,7 +124,7 @@
     s = s.replace(/廿/g, '二十').replace(/卅/g, '三十');
     if (!/^[零〇○一二兩两三四五六七八九十]+$/.test(s)) return NaN;
     const i = s.indexOf('十');
-    if (i === -1) {                       // 例如「一二」→ 12
+    if (i === -1) {
       let n = 0;
       for (const c of s) n = n * 10 + CN_DIGIT[c];
       return n;
@@ -132,7 +137,7 @@
     return tens * 10 + ones;
   }
 
-  // ================= 範圍（之後可以加新範圍） =================
+  // ================= 範圍 =================
   const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
   const NUM = '[0-9０-９零〇○一二兩两三四五六七八九十廿卅]+';
   const DATE_RE = new RegExp('(' + NUM + ')\\s*月\\s*(' + NUM + ')\\s*(?:日|號|号)', 'g');
@@ -140,20 +145,23 @@
   const RANGES = {
     date: {
       label: '日子',
-      // 喺一段文字入面搵最後一個有效日子
       parse(text) {
         let found = null, m;
         DATE_RE.lastIndex = 0;
         while ((m = DATE_RE.exec(text)) !== null) {
           const mo = parseNum(m[1]), d = parseNum(m[2]);
-          if (mo >= 1 && mo <= 12 && d >= 1 && d <= DAYS_IN_MONTH[mo - 1]) {
+          if (mo >= 1 && mo <= 12 && d >= 1 && d <= DAYS_IN_MONTH[mo - 1]
+              && CARD_TABLE[mo + d]) {          // 對照表冇嘅總和當無效
             found = { m: mo, d: d };
           }
         }
         return found;
       },
       format(item) { return item.m + '月' + item.d + '日'; },
-      query(item)  { return CARD_TABLE[item.m + item.d]; }
+      query(item) {
+        const code = CARD_TABLE[item.m + item.d];
+        return code ? cardToQuery(code) : null;
+      }
     }
   };
 
@@ -169,11 +177,11 @@
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   let settings = { range: 'date', lang: 'zh-HK' };
-  let active = false;        // 表演緊
-  let redirecting = false;   // 跳轉緊
-  let rec = null;            // 目前嘅語音辨識
-  let committed = null;      // 之前幾段收音留低嘅日子
-  let current = null;        // 而家顯示緊嘅日子
+  let active = false;
+  let redirecting = false;
+  let rec = null;
+  let committed = null;
+  let current = null;
   let restartTimer = null;
   let failCount = 0;
   let fatal = false;
@@ -226,7 +234,7 @@
 
   // ================= 表演流程 =================
   function startPerformance() {
-    if (Date.now() - exitAt < 600) return;  // 防止雙擊離開時誤觸
+    if (Date.now() - exitAt < 600) return;
     settings.range = els.rangeSel.value;
     settings.lang = els.langSel.value;
     saveSettings();
@@ -237,7 +245,7 @@
     els.perform.classList.add('active');
     setStatus('yellow');
 
-    startRecognition();      // 要喺撳掣嗰下即刻開始（iOS 要求）
+    startRecognition();
     requestWakeLock();
   }
 
@@ -264,7 +272,6 @@
     els.dot.className = color;
   }
 
-  // 處理一段收音嘅全部文字
   function handleTranscript(text) {
     const range = RANGES[settings.range];
     const parts = text.split(CONFIRM_WORD);
@@ -273,22 +280,23 @@
       const found = range.parse(parts[i]);
       if (found) item = found;
       const followedByConfirm = i < parts.length - 1;
-      if (followedByConfirm && item) {   // 「非常好」前面有日子 → 跳轉
+      if (followedByConfirm && item) {
         setCurrent(item);
         go(range, item);
         return;
       }
-      // 「非常好」前面冇日子 → 唔理，繼續
     }
     setCurrent(item);
   }
 
   function go(range, item) {
     if (redirecting) return;
+    const q = range.query(item);
+    if (!q) return;
     redirecting = true;
     stopRecognition();
-    const q = range.query(item);
-    location.replace('https://www.google.com/search?q=' + encodeURIComponent(q));
+    // Google 圖片搜尋
+    location.replace('https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(q));
   }
 
   // ================= 語音辨識 =================
@@ -326,7 +334,7 @@
     r.onend = () => {
       if (rec !== r) return;
       rec = null;
-      committed = current;               // 保留已經聽到嘅日子
+      committed = current;
       if (!active || redirecting) return;
       if (fatal) { setStatus('red'); return; }
       if (!started) failCount++;
@@ -385,13 +393,12 @@
   els.perform.addEventListener('touchend', (e) => {
     const now = Date.now();
     if (now - lastTap < DOUBLE_TAP_MS) {
-      e.preventDefault();             // 阻止放大同埋誤觸設定畫面
+      e.preventDefault();
       lastTap = 0;
       exitPerformance();
       return;
     }
     lastTap = now;
-    // 狀態紅色時，撳一下畫面會用手勢重新開始收音
     if (active && statusColor === 'red') {
       stopRecognition();
       fatal = false; failCount = 0;
@@ -400,7 +407,7 @@
     }
   }, { passive: false });
 
-  els.perform.addEventListener('dblclick', (e) => {   // 電腦測試用
+  els.perform.addEventListener('dblclick', (e) => {
     e.preventDefault();
     exitPerformance();
   });
