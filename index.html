@@ -294,8 +294,7 @@
     const q = range.query(item);
     if (!q) return;
     redirecting = true;
-    clearTimeout(restartTimer);
-    //stopRecognition();
+    stopRecognition();
     // Google 圖片搜尋
     location.replace('https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(q));
   }
