@@ -85,7 +85,8 @@ html, body {
   const CONFIRM_WORD = '非常好';
   const DOUBLE_TAP_MS = 400;
   const STORE_KEY = 'voice.settings';
-  const LEAVE_WAIT_MS = 800;   // 跳轉前最多等幾耐俾咪關好
+  const LEAVE_MODE = 1;        // 1 = 收咪即跳｜2 = 唔收咪即跳｜3 = 等咪關好先跳
+  const LEAVE_WAIT_MS = 800;   // 模式 3 最多等幾耐
 
   // 對照表：總和 → 牌（S黑桃 H紅桃 D方塊 C梅花）
   const CARD_TABLE = {
@@ -280,7 +281,7 @@ html, body {
     setCurrent(item);
   }
 
-  // 等咪真正關咗（end 事件）先跳轉，最多等 LEAVE_WAIT_MS
+  // 跳轉方式由 LEAVE_MODE 決定
   function go(range, item) {
     if (redirecting) return;
     const q = range.query(item);
@@ -296,13 +297,24 @@ html, body {
       location.replace(url);
     };
 
-    const r = rec;
-    if (r) {
-      r.addEventListener('end', leave);   // 咪真正關咗先跳
-      setTimeout(leave, LEAVE_WAIT_MS);   // 保險：等太耐都照跳
+    if (LEAVE_MODE === 1) {
+      // 模式 1：收咪之後即刻跳（最初版本嘅做法）
+      stopRecognition();
+      leave();
+    } else if (LEAVE_MODE === 2) {
+      // 模式 2：唔叫 abort，直接跳，等跳轉自己收咪
+      clearTimeout(restartTimer);
+      leave();
+    } else {
+      // 模式 3：等咪真正關咗（end 事件）先跳，最多等 LEAVE_WAIT_MS
+      const r = rec;
+      if (r) {
+        r.addEventListener('end', leave);
+        setTimeout(leave, LEAVE_WAIT_MS);
+      }
+      stopRecognition();
+      if (!r) leave();
     }
-    stopRecognition();
-    if (!r) leave();
   }
 
   // ================= 語音辨識 =================
