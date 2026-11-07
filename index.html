@@ -85,8 +85,6 @@ html, body {
   const CONFIRM_WORD = '非常好';
   const DOUBLE_TAP_MS = 400;
   const STORE_KEY = 'voice.settings';
-  const LEAVE_MODE = 2;        // 1 = 收咪即跳｜2 = 唔收咪即跳｜3 = 等咪關好先跳
-  const LEAVE_WAIT_MS = 800;   // 模式 3 最多等幾耐
 
   // 對照表：總和 → 牌（S黑桃 H紅桃 D方塊 C梅花）
   const CARD_TABLE = {
@@ -143,9 +141,9 @@ html, body {
         DATE_RE.lastIndex = 0;
         while ((m = DATE_RE.exec(text)) !== null) {
           const mo = parseNum(m[1]), d = parseNum(m[2]);
+          // 日子要真實存在，而且總和要喺對照表入面
           if (mo >= 1 && mo <= 12 && d >= 1 && d <= DAYS_IN_MONTH[mo - 1]
               && CARD_TABLE[mo + d]) {
-            // 對照表冇嘅總和當無效
             found = { m: mo, d: d };
           }
         }
@@ -281,40 +279,14 @@ html, body {
     setCurrent(item);
   }
 
-  // 跳轉方式由 LEAVE_MODE 決定
+  // 收咪，然後即刻跳去 Google 圖片搜尋
   function go(range, item) {
     if (redirecting) return;
     const q = range.query(item);
     if (!q) return;
     redirecting = true;
-
-    // Google 圖片搜尋
-    const url = 'https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(q);
-    let left = false;
-    const leave = () => {
-      if (left) return;
-      left = true;
-      location.replace(url);
-    };
-
-    if (LEAVE_MODE === 1) {
-      // 模式 1：收咪之後即刻跳（最初版本嘅做法）
-      stopRecognition();
-      leave();
-    } else if (LEAVE_MODE === 2) {
-      // 模式 2：唔叫 abort，直接跳，等跳轉自己收咪
-      clearTimeout(restartTimer);
-      leave();
-    } else {
-      // 模式 3：等咪真正關咗（end 事件）先跳，最多等 LEAVE_WAIT_MS
-      const r = rec;
-      if (r) {
-        r.addEventListener('end', leave);
-        setTimeout(leave, LEAVE_WAIT_MS);
-      }
-      stopRecognition();
-      if (!r) leave();
-    }
+    stopRecognition();
+    location.replace('https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(q));
   }
 
   // ================= 語音辨識 =================
@@ -438,6 +410,7 @@ html, body {
     }
   });
 
+  // 由 Google 撳返回時，回到設定畫面
   window.addEventListener('pageshow', (e) => {
     if (e.persisted) {
       redirecting = false;
@@ -448,5 +421,5 @@ html, body {
   initSetup();
 })();
 </script>
-</body>
+</b​ody>
 </html>
